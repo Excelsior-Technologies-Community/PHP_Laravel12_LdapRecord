@@ -2,9 +2,15 @@
 
 namespace App\Models;
 
-use LdapRecord\Models\OpenLDAP\User as LdapUserModel;
+use Illuminate\Database\Eloquent\Model;
 
-class LdapUser extends LdapUserModel
+class LdapUser extends Model
 {
-    protected ?string $connection = 'default';
+    protected $table = 'ldap_users';
+
+    protected $fillable = [
+        'guid',
+        'username',
+        'email',
+    ];
 }
