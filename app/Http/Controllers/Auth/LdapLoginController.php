@@ -5,74 +5,80 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use LdapRecord\Models\OpenLDAP\User as LdapUser; // LDAP model
+use LdapRecord\Models\OpenLDAP\User as LdapUser;
 use LdapRecord\Auth\BindException;
-use App\Models\LocalLdapUser; // Local MySQL model
+use App\Models\LocalLdapUser;
+use App\Models\LdapAuditLog;
+use LdapRecord\Container;
+use Exception;
 
 class LdapLoginController extends Controller
 {
-    /**
-     * Show the login form
-     */
     public function showLoginForm()
     {
         return view('auth.login');
     }
 
-    /**
-     * Handle login request
-     */
     public function login(Request $request)
     {
-        // Validate input
         $request->validate([
+            'domain' => 'required|string',
             'username' => 'required|string',
             'password' => 'required|string',
         ]);
 
         $username = $request->input('username');
         $password = $request->input('password');
+        $domain = $request->input('domain');
 
-        // Step 1: Find user in LDAP
-        $ldapUser = LdapUser::where('uid', $username)->first();
-
-        if (!$ldapUser) {
-            return back()->withErrors([
-                'username' => 'User not found in LDAP.'
-            ]);
-        }
-
-        // Step 2: Attempt LDAP bind (check password)
         try {
+            Container::setDefaultConnection($domain);
+            $connection = Container::getConnection($domain);
+            $connection->connect();
+
+            $ldapUser = LdapUser::where('uid', $username)->first();
+
+            if (!$ldapUser) {
+                $this->logAttempt($username, $request->ip(), 'failed');
+                return back()->withErrors(['username' => 'User not found in LDAP.']);
+            }
+
             $ldapUser->getConnection()->auth()->attempt(
                 $ldapUser->getDn(),
                 $password
             );
 
-            // Step 3: Sync user to local DB (Eloquent)
             $localUser = LocalLdapUser::updateOrCreate(
-                ['guid' => $ldapUser->getFirstAttribute('entryuuid')], // Unique ID from LDAP
+                ['guid' => $ldapUser->getFirstAttribute('entryuuid')],
                 [
                     'username' => $ldapUser->getFirstAttribute('uid'),
                     'email' => $ldapUser->getFirstAttribute('mail') ?? null,
                 ]
             );
 
-            // Step 4: Log in via Laravel session
             Auth::login($localUser);
+            
+            $this->logAttempt($username, $request->ip(), 'success');
 
             return redirect()->intended('dashboard');
 
         } catch (BindException $e) {
-            return back()->withErrors([
-                'username' => 'Invalid credentials.'
-            ]);
+            $this->logAttempt($username, $request->ip(), 'failed');
+            return back()->withErrors(['username' => 'Invalid credentials.']);
+        } catch (Exception $e) {
+            return back()->withErrors(['username' => 'LDAP Server Error: ' . $e->getMessage()]);
         }
     }
 
-    /**
-     * Logout user
-     */
+    private function logAttempt($username, $ip, $status)
+    {
+        LdapAuditLog::create([
+            'username' => $username,
+            'ip_address' => $ip,
+            'status' => $status,
+        ]);
+    }
+
     public function logout()
     {
         Auth::logout();

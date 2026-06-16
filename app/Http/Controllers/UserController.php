@@ -4,10 +4,10 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\LocalLdapUser;
+use LdapRecord\Models\OpenLDAP\User as LdapUser;
 
 class UserController extends Controller
 {
-    // Show users with search + pagination
     public function index(Request $request)
     {
         $search = $request->search;
@@ -16,12 +16,34 @@ class UserController extends Controller
             $query->where('username', 'like', "%$search%")
                 ->orWhere('email', 'like', "%$search%");
         })
-            ->orderBy('id', 'asc') //  ASC ORDER
+            ->orderBy('id', 'asc')
             ->paginate(5);
 
         return view('users.index', compact('users', 'search'));
     }
-    // Delete user
+
+    public function syncUsers()
+    {
+        try {
+            $ldapUsers = LdapUser::get();
+
+            foreach ($ldapUsers as $ldapUser) {
+                LocalLdapUser::updateOrCreate(
+                    ['guid' => $ldapUser->getFirstAttribute('entryuuid')],
+                    [
+                        'username' => $ldapUser->getFirstAttribute('uid'),
+                        'name' => $ldapUser->getFirstAttribute('cn'),
+                        'email' => $ldapUser->getFirstAttribute('mail')
+                    ]
+                );
+            }
+
+            return redirect()->back()->with('success', 'Users synced successfully!');
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['error' => 'Sync failed: ' . $e->getMessage()]);
+        }
+    }
+
     public function destroy($id)
     {
         $user = LocalLdapUser::findOrFail($id);
