@@ -591,7 +591,3 @@ PHP_Laravel12_LdapRecord/
 ---
 
 Your PHP_Laravel12_LdapRecord Project is now ready!
-<<<<<<< HEAD
-
-=======
->>>>>>> development
